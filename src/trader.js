@@ -1,4 +1,5 @@
 import BinanceClient from './binanceClient.js'
+import { USDT_QTY } from './config.js'
 
 export default class Trader {
     constructor ({ logger }) {
@@ -10,9 +11,7 @@ export default class Trader {
     async executeDecision ({ symbol, decision, currentPrice }) {
     if (!decision || decision.action === 'NONE') return { ok: false, reason: 'no action' }
 
-    // We'll use a simple sizing model for demo: fixed qty per symbol. In production, replace with risk sizing.
-    const qtyMap = { BTCUSDT: 0.001, ETHUSDT: 0.01, XRPUSDT: 50, SOLUSDT: 0.5 }
-    const quantity = qtyMap[symbol] || 0.01
+    const quantity = USDT_QTY
     
     const side = decision.action === 'LONG' ? 'BUY' : 'SELL'
 

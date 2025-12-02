@@ -9,3 +9,4 @@ export const DECISION_GRACE_SEC = parseInt(process.env.DECISION_GRACE_SEC || '5'
 export const BINANCE_API_KEY = process.env.BINANCE_API_KEY || ''
 export const BINANCE_API_SECRET = process.env.BINANCE_API_SECRET || ''
 export const BINANCE_USE_TESTNET = (process.env.BINANCE_USE_TESTNET || 'true') === 'true'
+export const USDT_QTY = process.env.USDT_QTY || 100

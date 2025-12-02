@@ -1,11 +1,13 @@
 import axios from 'axios'
 import crypto from 'crypto'
-import { BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_USE_TESTNET } from './config.js'
+import { BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_USE_TESTNET , USDT_QTY} from './config.js'
 
 // Always use Binance USDT-M Futures mainnet or testnet
 const baseURL = BINANCE_USE_TESTNET 
     ? 'https://testnet.binancefuture.com'
     : 'https://fapi.binance.me'
+
+const priceMap = new Map();
 
 export default class BinanceClient {
     constructor({ logger }) {
@@ -58,6 +60,10 @@ export default class BinanceClient {
             }),
             `getKlines(${symbol})`
         )
+
+        let price = res.data[0][4]
+        priceMap.set(symbol, price)
+
         return res.data
     }
 
@@ -116,31 +122,88 @@ export default class BinanceClient {
     /* -----------------------------------------------------------
         PLACE FUTURES ORDER
        ----------------------------------------------------------- */
-    async placeOrder(symbol, side, type, quantity, price = undefined) {
+    async placeOrder(symbol, side, type, usdtAmount, entryPrice = undefined) {
         const timestamp = Date.now()
+
+        // Convert USDT → quantity
+        const qty = usdtAmount / priceMap[symbol]
 
         const params = new URLSearchParams({
             symbol,
             side,
             type,
-            quantity: String(quantity),
+            quantity: String(qty),
             timestamp: String(timestamp)
         })
 
-        if (price) params.append('price', String(price))
+        if (entryPrice) params.append('price', String(entryPrice))
 
         const signature = this.sign(params.toString())
         params.append('signature', signature)
 
-        const res = await this.safeRequest(
-            this.axios.post(
-                '/fapi/v1/order',
-                params.toString(),
-                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-            ),
+        // 1️⃣ Place ENTRY order
+        const entry = await this.safeRequest(
+            this.axios.post('/fapi/v1/order', params.toString(), {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            }),
             `placeOrder(${symbol}, ${side})`
         )
 
-        return res.data
+        const executedPrice = entryPrice || priceMap[symbol]
+
+        // 2️⃣ RISK-TO-REWARD SETTINGS
+        const riskPct = 0.01              // 1% risk (example)
+        const rewardMultiplier = 1.5      // 3:2 R:R (reward = 1.5x risk)
+
+        const riskAmount = executedPrice * riskPct
+        const rewardAmount = riskAmount * rewardMultiplier
+
+        let stopLoss, takeProfit
+
+        if (side === "BUY") {
+            stopLoss = executedPrice - riskAmount
+            takeProfit = executedPrice + rewardAmount
+        } else {
+            stopLoss = executedPrice + riskAmount
+            takeProfit = executedPrice - rewardAmount
+        }
+
+        // 3️⃣ PLACE STOP-LOSS ORDER
+        await this.safeRequest(
+            this.axios.post('/fapi/v1/order', 
+                new URLSearchParams({
+                    symbol,
+                    side: side === "BUY" ? "SELL" : "BUY",
+                    type: "STOP_MARKET",
+                    stopPrice: stopLoss,
+                    closePosition: "true",
+                    timestamp: Date.now()
+                }).toString(),
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            ),
+            `SL(${symbol})`
+        )
+
+        // 4️⃣ PLACE TAKE-PROFIT ORDER
+        await this.safeRequest(
+            this.axios.post('/fapi/v1/order', 
+                new URLSearchParams({
+                    symbol,
+                    side: side === "BUY" ? "SELL" : "BUY",
+                    type: "TAKE_PROFIT_MARKET",
+                    stopPrice: takeProfit,
+                    closePosition: "true",
+                    timestamp: Date.now()
+                }).toString(),
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            ),
+            `TP(${symbol})`
+        )
+
+        return {
+            entry: entry.data,
+            stopLoss,
+            takeProfit
+        }
     }
 }
