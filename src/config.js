@@ -1,3 +1,6 @@
+import dotenv from 'dotenv'
+dotenv.config()
+
 export const SYMBOLS = (process.env.SYMBOLS || 'BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT').split(',').map(s => s.trim())
 export const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '3000', 10)
 export const PRICE_BINS = parseInt(process.env.PRICE_BINS || '40', 10)

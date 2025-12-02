@@ -13,8 +13,6 @@ export default class BinanceClient {
 
         this.axios = axios.create({ baseURL })
 
-        console.log("Binance API Key:", BINANCE_API_KEY)
-
         if (BINANCE_API_KEY) {
             this.axios.defaults.headers['X-MBX-APIKEY'] = BINANCE_API_KEY
         }
