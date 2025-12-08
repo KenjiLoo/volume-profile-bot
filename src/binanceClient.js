@@ -120,8 +120,8 @@ export default class BinanceClient {
     }
 
     /* -----------------------------------------------------------
-    SET FUTURES LEVERAGE
-    ----------------------------------------------------------- */
+        SET FUTURES LEVERAGE
+        ----------------------------------------------------------- */
     async setLeverage(symbol) {
         const timestamp = Date.now()
 
@@ -143,12 +143,43 @@ export default class BinanceClient {
     }
 
     /* -----------------------------------------------------------
+        SET MARGIN MODE = ISOLATED
+        ----------------------------------------------------------- */
+    async setMarginType(symbol) {
+        const timestamp = Date.now()
+
+        const params = new URLSearchParams({
+            symbol,
+            marginType: 'ISOLATED',
+            timestamp: String(timestamp)
+        })
+
+        const signature = this.sign(params.toString())
+        params.append('signature', signature)
+
+        try {
+            return await this.safeRequest(
+                this.axios.post('/fapi/v1/marginType', params.toString(), {
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                }),
+                `setMarginType(${symbol}, ISOLATED)`
+            )
+        } catch (err) {
+            if (err.message.includes('No need to change margin type')) {
+                return
+            }
+            throw err
+        }
+    }
+
+    /* -----------------------------------------------------------
         PLACE FUTURES ORDER
        ----------------------------------------------------------- */
     async placeOrder(symbol, side, type, usdtAmount, entryPrice = undefined) {
         const timestamp = Date.now()
 
-        // 1️⃣ Always force leverage = 3x
+        // 1️⃣ Always force leverage + ISOLATED
+        await this.setMarginType(symbol)
         await this.setLeverage(symbol)
 
         // 2️⃣ Convert USDT → quantity using leverage
