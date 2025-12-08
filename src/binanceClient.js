@@ -1,6 +1,6 @@
 import axios from 'axios'
 import crypto from 'crypto'
-import { BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_USE_TESTNET , USDT_QTY} from './config.js'
+import { BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_USE_TESTNET, DEFAULT_LEVERAGE} from './config.js'
 
 // Always use Binance USDT-M Futures mainnet or testnet
 const baseURL = BINANCE_USE_TESTNET 
@@ -120,13 +120,40 @@ export default class BinanceClient {
     }
 
     /* -----------------------------------------------------------
+    SET FUTURES LEVERAGE
+    ----------------------------------------------------------- */
+    async setLeverage(symbol) {
+        const timestamp = Date.now()
+
+        const params = new URLSearchParams({
+            symbol,
+            leverage: String(DEFAULT_LEVERAGE),
+            timestamp: String(timestamp)
+        })
+
+        const signature = this.sign(params.toString())
+        params.append('signature', signature)
+
+        return await this.safeRequest(
+            this.axios.post('/fapi/v1/leverage', params.toString(), {
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            }),
+            `setLeverage(${symbol}, ${DEFAULT_LEVERAGE})`
+        )
+    }
+
+    /* -----------------------------------------------------------
         PLACE FUTURES ORDER
        ----------------------------------------------------------- */
     async placeOrder(symbol, side, type, usdtAmount, entryPrice = undefined) {
         const timestamp = Date.now()
 
-        // Convert USDT → quantity
-        const qty = usdtAmount / priceMap[symbol]
+        // 1️⃣ Always force leverage = 3x
+        await this.setLeverage(symbol)
+
+        // 2️⃣ Convert USDT → quantity using leverage
+        const leveragedNotional = usdtAmount * DEFAULT_LEVERAGE
+        const qty = leveragedNotional / priceMap.get(symbol)
 
         const params = new URLSearchParams({
             symbol,
@@ -141,7 +168,7 @@ export default class BinanceClient {
         const signature = this.sign(params.toString())
         params.append('signature', signature)
 
-        // 1️⃣ Place ENTRY order
+        // 3️⃣ PLACE ENTRY ORDER
         const entry = await this.safeRequest(
             this.axios.post('/fapi/v1/order', params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -149,11 +176,11 @@ export default class BinanceClient {
             `placeOrder(${symbol}, ${side})`
         )
 
-        const executedPrice = entryPrice || priceMap[symbol]
+        const executedPrice = entryPrice || priceMap.get(symbol)
 
-        // 2️⃣ RISK-TO-REWARD SETTINGS
-        const riskPct = 0.01              // 1% risk (example)
-        const rewardMultiplier = 1.5      // 3:2 R:R (reward = 1.5x risk)
+        // 4️⃣ RISK:REWARD = 3:2
+        const riskPct = 0.01
+        const rewardMultiplier = 1.5
 
         const riskAmount = executedPrice * riskPct
         const rewardAmount = riskAmount * rewardMultiplier
@@ -168,9 +195,9 @@ export default class BinanceClient {
             takeProfit = executedPrice - rewardAmount
         }
 
-        // 3️⃣ PLACE STOP-LOSS ORDER
+        // 5️⃣ STOP LOSS
         await this.safeRequest(
-            this.axios.post('/fapi/v1/order', 
+            this.axios.post('/fapi/v1/order',
                 new URLSearchParams({
                     symbol,
                     side: side === "BUY" ? "SELL" : "BUY",
@@ -184,9 +211,9 @@ export default class BinanceClient {
             `SL(${symbol})`
         )
 
-        // 4️⃣ PLACE TAKE-PROFIT ORDER
+        // 6️⃣ TAKE PROFIT
         await this.safeRequest(
-            this.axios.post('/fapi/v1/order', 
+            this.axios.post('/fapi/v1/order',
                 new URLSearchParams({
                     symbol,
                     side: side === "BUY" ? "SELL" : "BUY",
